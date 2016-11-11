@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "request": "^2.78.0"
+    "request": "^2.78.0",
+    "tree-kill": "^1.1.0"
   }
 }

